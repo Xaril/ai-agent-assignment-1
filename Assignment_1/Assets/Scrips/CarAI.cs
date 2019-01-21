@@ -14,6 +14,8 @@ namespace UnityStandardAssets.Vehicles.Car
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
+        public ConfigurationSpace configurationSpace;
+
         private void Awake()
         {
             // get the car controller
@@ -22,6 +24,9 @@ namespace UnityStandardAssets.Vehicles.Car
 
             // Plan your path here
             // ...
+            configurationSpace = new ConfigurationSpace();
+
+
         }
 
 
@@ -29,6 +34,7 @@ namespace UnityStandardAssets.Vehicles.Car
         {
             // Execute your path here
             // ...
+            //configurationSpace.CalculateAngleLengths();
 
             // this is how you access information about the terrain
             int i = terrain_manager.myInfo.get_i_index(transform.position.x);
