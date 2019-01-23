@@ -13,21 +13,56 @@ namespace UnityStandardAssets.Vehicles.Car
         public float maxVelocity;
         public float acceleration;
 
+        private float timeStep;
+        private int numberOfSteps;
+
+        private float carLength;
+        private float delta;
+
+        private TreePoint start;
+
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
         public ConfigurationSpace configurationSpace;
 
+        private Vector3 randomTestPoint;
+
         private void Awake()
         {
             // get the car controller
             m_Car = GetComponent<CarController>();
-            maxVelocity = 3;
-            acceleration = 0.2f;
-
             terrain_manager = terrain_manager_game_object.GetComponent<TerrainManager>();
 
+            maxVelocity = 3;
+            acceleration = 1f;
+
             InitializeCSpace();
+
+            timeStep = 0.2f;
+            numberOfSteps = 25;
+
+            carLength = FindCarLength();
+            delta = 0;
+
+            start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
+
+            do
+            {
+                randomTestPoint = new Vector3(
+                    UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
+                    0,
+                    UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
+                );
+            }
+            while (configurationSpace.Collision(randomTestPoint.x, randomTestPoint.z, 0));
+            GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.transform.position = randomTestPoint;
+            cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
+            cube.transform.eulerAngles = new Vector3(0, 0, 0);
+            cube.GetComponent<MeshRenderer>().material.color = Color.blue;
+
+            TreePoint endPoint = SimulateMovement(start, randomTestPoint);
         }
 
 
@@ -36,8 +71,46 @@ namespace UnityStandardAssets.Vehicles.Car
 
         }
 
+        public TreePoint SimulateMovement(TreePoint from, Vector3 to)
+        {
+            Vector3 position = from.position;
+            float theta = from.theta;
+            float velocity = from.velocity;
+            for(int step = 0; step < numberOfSteps; step++)
+            {
+                float delta = m_Car.m_MaximumSteerAngle * SteerInput(position, theta, to);
+                if(velocity < 0)
+                {
+                    delta = -delta;
+                }
+                Debug.Log(delta);
+
+                float xDiff = velocity * Mathf.Sin(Mathf.Deg2Rad * theta);
+                float zDiff = velocity * Mathf.Cos(Mathf.Deg2Rad * theta);
+                float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta);
+
+                position = new Vector3(Euler(position.x, xDiff, timeStep), 0, Euler(position.z, zDiff, timeStep));
+                theta = Euler(theta, thetaDiff, timeStep);
+
+                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.transform.position = position;
+                cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
+                cube.transform.eulerAngles = new Vector3(0, theta, 0);
+                cube.GetComponent<BoxCollider>().enabled = false;
+
+                velocity += Mathf.Clamp(AccelerationInput(position, theta, to) * acceleration * timeStep, -maxVelocity, maxVelocity);
+            }
+
+            return new TreePoint(position, theta, velocity);
+        }
+
+        float Euler(float value, float difference, float step)
+        {
+            return value + difference * step;
+        }
+
         //Determines delta for the kinematic motion model
-        private float steerInput(Vector3 position, float theta, Vector3 point)
+        private float SteerInput(Vector3 position, float theta, Vector3 point)
         {
             Vector3 direction = Quaternion.Euler(0, theta, 0) * Vector3.forward;
             Vector3 directionToPoint = point - position;
@@ -45,7 +118,7 @@ namespace UnityStandardAssets.Vehicles.Car
         }
 
         //Determines acceleration which is used to determine v for the kinematic motion model
-        private float accelerationInput(Vector3 position, float theta, Vector3 point)
+        private float AccelerationInput(Vector3 position, float theta, Vector3 point)
         {
             Vector3 direction = Quaternion.Euler(0, theta, 0) * Vector3.forward;
             Vector3 directionToPoint = point - position;
@@ -95,6 +168,22 @@ namespace UnityStandardAssets.Vehicles.Car
                     }
                 }
             }
+        }
+
+        private float FindCarLength()
+        {
+            WheelCollider[] wheels = FindObjectsOfType<WheelCollider>();
+            float maxValue = 0;
+            float midValue = 0;
+            for (int i = 1; i < wheels.Length; ++i)
+            {
+                if ((wheels[0].transform.position - wheels[i].transform.position).magnitude > maxValue)
+                {
+                    midValue = maxValue;
+                    maxValue = (wheels[0].transform.position - wheels[i].transform.position).magnitude;
+                }
+            }
+            return midValue;
         }
     }
 }

@@ -9,6 +9,7 @@ TagManager:
   - Rescuer
   - Searcher
   - config_cube
+  - TestPoint
   layers:
   - Default
   - TransparentFX
