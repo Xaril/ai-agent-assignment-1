@@ -10,6 +10,8 @@ namespace UnityStandardAssets.Vehicles.Car
     public class CarAI : MonoBehaviour
     {
         private CarController m_Car; // the car controller we want to use
+        public float maxVelocity;
+        public float acceleration;
 
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
@@ -20,35 +22,45 @@ namespace UnityStandardAssets.Vehicles.Car
         {
             // get the car controller
             m_Car = GetComponent<CarController>();
+            maxVelocity = 3;
+            acceleration = 0.2f;
+
             terrain_manager = terrain_manager_game_object.GetComponent<TerrainManager>();
 
-            //Get size of car collider to be used with C space
+            InitializeCSpace();
+        }
+
+
+        private void FixedUpdate()
+        {
+
+        }
+
+        //Determines delta for the kinematic motion model
+        private float steerInput(Vector3 position, float theta, Vector3 point)
+        {
+            Vector3 direction = Quaternion.Euler(0, theta, 0) * Vector3.forward;
+            Vector3 directionToPoint = point - position;
+            return Mathf.Clamp(-direction.x * directionToPoint.z + direction.z * directionToPoint.x, -1, 1);
+        }
+
+        //Determines acceleration which is used to determine v for the kinematic motion model
+        private float accelerationInput(Vector3 position, float theta, Vector3 point)
+        {
+            Vector3 direction = Quaternion.Euler(0, theta, 0) * Vector3.forward;
+            Vector3 directionToPoint = point - position;
+            return Mathf.Clamp(direction.x * directionToPoint.x + direction.z * directionToPoint.z, -1, 1);
+        }
+
+        //Get size of car collider to be used with C space
+        private void InitializeCSpace()
+        {
             Quaternion carRotation = m_Car.transform.rotation;
             m_Car.transform.rotation = Quaternion.identity;
             configurationSpace = new ConfigurationSpace();
             BoxCollider carCollider = GameObject.Find("ColliderBottom").GetComponent<BoxCollider>();
             configurationSpace.BoxSize = carCollider.transform.TransformVector(carCollider.size);
             m_Car.transform.rotation = carRotation;
-        }
-
-
-        private void FixedUpdate()
-        {
-            // Execute your path here
-            // ...
-
-            // this is how you access information about the terrain
-            //int i = terrain_manager.myInfo.get_i_index(transform.position.x);
-            //int j = terrain_manager.myInfo.get_j_index(transform.position.z);
-            //float grid_center_x = terrain_manager.myInfo.get_x_pos(i);
-            //float grid_center_z = terrain_manager.myInfo.get_z_pos(j);
-
-            //Debug.DrawLine(transform.position, new Vector3(grid_center_x, 0f, grid_center_z));
-
-
-            // this is how you control the car
-            //m_Car.Move(1f, 1f, 1f, 0f);
-
         }
 
         //Visualizes the configuration space by adding red boxes where the center point of the car cannot go.
