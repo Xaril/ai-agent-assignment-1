@@ -44,7 +44,7 @@ namespace UnityStandardAssets.Vehicles.Car
             InitializeCSpace();
 
             timeStep = 0.1f;
-            numberOfSteps = 15;
+            numberOfSteps = 5;
             time = 0;
 
             steerDirection = 0;
@@ -56,25 +56,14 @@ namespace UnityStandardAssets.Vehicles.Car
             path = new List<TreePoint>();
             pathIndex = 1;
 
-            //<RRT>
-            Vector3 randomPoint;
-            
-            do
+            path = RRT();
+
+            if(path == null)
             {
-                randomPoint = new Vector3(
-                    UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
-                    0,
-                    UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
-                );
+                Debug.Log("No path found!");
             }
-            while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
-
-            TreePoint newPoint = SimulateMovement(start, randomPoint);
-            //</RRT>
-
             nextPoint = path[pathIndex];
         }
-
 
         private void FixedUpdate()
         {
@@ -115,6 +104,90 @@ namespace UnityStandardAssets.Vehicles.Car
             }
         }
 
+        public List<TreePoint> RRT()
+        {
+            bool foundGoal = false;
+            TreePoint pathPoint = null;
+            for(int i = 0; i < 25000; i++)
+            {
+                Vector3 randomPoint;
+                do
+                {
+                    randomPoint = new Vector3(
+                        UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
+                        0,
+                        UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
+                    );
+                }
+                while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
+
+                TreePoint nearPoint = NearestNeighbour(randomPoint);
+                TreePoint newPoint = SimulateMovement(nearPoint, randomPoint);
+                if(newPoint != null)
+                {
+                    newPoint.parent = nearPoint;
+                    nearPoint.children.Add(newPoint);
+
+                    if (Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) <= 5)
+                    {
+                        foundGoal = true;
+                        pathPoint = newPoint;
+                        break;
+                    }
+                }
+            }
+
+            if(foundGoal)
+            {
+                List<TreePoint> goalPath = new List<TreePoint>();
+                goalPath.Add(pathPoint);
+                float color = 0;
+                while(pathPoint.parent != null)
+                {
+                    GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    cube.transform.position = new Vector3(pathPoint.position.x, 0.0f, pathPoint.position.z);
+                    cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
+                    cube.GetComponent<BoxCollider>().enabled = false;
+                    cube.GetComponent<MeshRenderer>().material.color = new Color(color, color, color);
+                    color+=5;
+
+                    goalPath.Insert(0, pathPoint.parent);
+                    pathPoint = pathPoint.parent;
+                }
+                return goalPath;
+            }
+            return null;
+        }
+
+        //Finds the nearest tree point to a point.
+        public TreePoint NearestNeighbour(Vector3 point)
+        {
+            Queue<TreePoint> queue = new Queue<TreePoint>();
+            queue.Enqueue(start);
+            float minDistance = Mathf.Infinity;
+            TreePoint nearestPoint = null;
+            while(queue.Count > 0)
+            {
+                TreePoint currentPoint = queue.Dequeue();
+                foreach(TreePoint child in currentPoint.children)
+                {
+                    queue.Enqueue(child);
+                }
+                float distance = MeasureDistance(currentPoint.position, point);
+                if(distance < minDistance)
+                {
+                    minDistance = distance;
+                    nearestPoint = currentPoint;
+                }
+            }
+            return nearestPoint;
+        }
+
+        private float MeasureDistance(Vector3 a, Vector3 b)
+        {
+            return Vector3.Distance(a, b);
+        }
+
         //Simulate movement from a point in the tree to a point in the plane.
         public TreePoint SimulateMovement(TreePoint from, Vector3 to)
         {
@@ -125,7 +198,7 @@ namespace UnityStandardAssets.Vehicles.Car
             {
                 //Get steering angle
                 float delta = m_Car.m_MaximumSteerAngle * SteerInput(position, theta, to);
-                if(velocity < 0)
+                if(/*velocity*/AccelerationInput(position, theta, to) < 0)
                 {
                     delta = -delta;
                 }
