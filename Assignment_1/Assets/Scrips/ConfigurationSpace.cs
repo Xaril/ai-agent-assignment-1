@@ -7,6 +7,7 @@ namespace UnityStandardAssets.Vehicles.Car
     public class ConfigurationSpace
     {
         private Vector3 boxSize;
+        private Vector3 padding = new Vector3(0.2f, 0, 0.2f);
 
         public Vector3 BoxSize
         {
@@ -17,7 +18,7 @@ namespace UnityStandardAssets.Vehicles.Car
 
             set
             {
-                boxSize = value;
+                boxSize = value + padding;
             }
         }
 

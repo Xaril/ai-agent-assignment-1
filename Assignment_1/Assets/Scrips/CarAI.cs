@@ -36,12 +36,13 @@ namespace UnityStandardAssets.Vehicles.Car
 
         private void Awake()
         {
+            Time.timeScale = 2;
             // get the car controller
             m_Car = GetComponent<CarController>();
             terrain_manager = terrain_manager_game_object.GetComponent<TerrainManager>();
 
             maxVelocity = 3;
-            acceleration = 1f;
+            acceleration = 0.2f;
 
             InitializeCSpace();
 
