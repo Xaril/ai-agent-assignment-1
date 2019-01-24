@@ -30,6 +30,8 @@ namespace UnityStandardAssets.Vehicles.Car
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
+        public bool visualize = false;
+
         public ConfigurationSpace configurationSpace;
 
         private void Awake()
@@ -101,6 +103,10 @@ namespace UnityStandardAssets.Vehicles.Car
             {
                 pathIndex = Mathf.Min(pathIndex + 1, path.Count-1);
                 nextPoint = path[pathIndex];
+            }
+            if(visualize)
+            {
+                VisualizeCSpace();
             }
         }
 
@@ -246,7 +252,9 @@ namespace UnityStandardAssets.Vehicles.Car
         {
             Vector3 direction = Quaternion.Euler(0, theta, 0) * Vector3.forward;
             Vector3 directionToPoint = point - position;
-            return Mathf.Clamp(-direction.x * directionToPoint.z + direction.z * directionToPoint.x, -1, 1);
+            float angle = Vector3.Angle(direction, directionToPoint) * Mathf.Sign(-direction.x * directionToPoint.z + direction.z * directionToPoint.x);
+            float steerAngle = Mathf.Clamp(angle, -25, 25) / 25;
+            return steerAngle;
         }
 
         //Determines acceleration which is used to determine v for the kinematic motion model
