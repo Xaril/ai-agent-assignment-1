@@ -27,6 +27,8 @@ namespace UnityStandardAssets.Vehicles.Car
         private TreePoint nextPoint;
         private int pathIndex;
 
+        private List<Vector3> aStarPath;
+
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
@@ -46,7 +48,7 @@ namespace UnityStandardAssets.Vehicles.Car
 
             InitializeCSpace();
 
-            timeStep = 0.1f;
+            timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
 
@@ -58,6 +60,8 @@ namespace UnityStandardAssets.Vehicles.Car
             start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
             path = new List<TreePoint>();
             pathIndex = 1;
+
+            aStarPath = AStar();
 
             path = RRT();
 
@@ -120,11 +124,7 @@ namespace UnityStandardAssets.Vehicles.Car
                 Vector3 randomPoint;
                 do
                 {
-                    randomPoint = new Vector3(
-                        UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
-                        0,
-                        UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
-                    );
+                    randomPoint = GetRandomPoint();
                 }
                 while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
 
@@ -148,15 +148,14 @@ namespace UnityStandardAssets.Vehicles.Car
             {
                 List<TreePoint> goalPath = new List<TreePoint>();
                 goalPath.Add(pathPoint);
-                float color = 0;
                 while(pathPoint.parent != null)
                 {
+                    //Visualize the path
                     GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
                     cube.transform.position = new Vector3(pathPoint.position.x, 0.0f, pathPoint.position.z);
                     cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
+                    cube.transform.eulerAngles = new Vector3(0, pathPoint.theta, 0);
                     cube.GetComponent<BoxCollider>().enabled = false;
-                    cube.GetComponent<MeshRenderer>().material.color = new Color(color, color, color);
-                    color+=5;
 
                     goalPath.Insert(0, pathPoint.parent);
                     pathPoint = pathPoint.parent;
@@ -164,6 +163,27 @@ namespace UnityStandardAssets.Vehicles.Car
                 return goalPath;
             }
             return null;
+        }
+
+        public Vector3 GetRandomPoint()
+        {
+            float probability = UnityEngine.Random.Range(0, 1);
+            if(probability < 0.5f)
+            {
+                return new Vector3(
+                    UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
+                    0,
+                    UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
+                );
+            }
+            else
+            {
+                return new Vector3(
+                    UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
+                    0,
+                    UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
+                );
+            }
         }
 
         //Finds the nearest tree point to a point.
@@ -205,7 +225,7 @@ namespace UnityStandardAssets.Vehicles.Car
             {
                 //Get steering angle
                 float delta = m_Car.m_MaximumSteerAngle * SteerInput(position, theta, to);
-                if(/*velocity*/AccelerationInput(position, theta, to) < 0)
+                if(AccelerationInput(position, theta, to) < 0)
                 {
                     delta = -delta;
                 }
@@ -246,6 +266,149 @@ namespace UnityStandardAssets.Vehicles.Car
         float Euler(float value, float difference, float step)
         {
             return value + difference * step;
+        }
+
+        //Calculates the shortest discrete path  
+        private List<Vector3> AStar()
+        {
+            Dictionary<Vector3, Vector3> cameFrom = new Dictionary<Vector3, Vector3>();
+            float[,] gScore = new float[terrain_manager.myInfo.x_N,terrain_manager.myInfo.z_N];
+            float[,] fScore = new float[terrain_manager.myInfo.x_N, terrain_manager.myInfo.z_N];
+
+
+            List<Vector3> open = new List<Vector3>();
+            List<Vector3> closed = new List<Vector3>();
+            Vector3 startCell = new Vector3(
+                terrain_manager.myInfo.get_x_pos(terrain_manager.myInfo.get_i_index(terrain_manager.myInfo.start_pos.x)),
+                0,
+                terrain_manager.myInfo.get_z_pos(terrain_manager.myInfo.get_j_index(terrain_manager.myInfo.start_pos.z))
+            );
+            open.Add(startCell);
+
+            Vector3 goalCell = new Vector3(
+                terrain_manager.myInfo.get_x_pos(terrain_manager.myInfo.get_i_index(terrain_manager.myInfo.goal_pos.x)),
+                0,
+                terrain_manager.myInfo.get_z_pos(terrain_manager.myInfo.get_j_index(terrain_manager.myInfo.goal_pos.z))
+            );
+
+            gScore[terrain_manager.myInfo.get_i_index(terrain_manager.myInfo.start_pos.x), 
+                   terrain_manager.myInfo.get_j_index(terrain_manager.myInfo.start_pos.z)] = 0;
+            fScore[terrain_manager.myInfo.get_i_index(terrain_manager.myInfo.start_pos.x), 
+                   terrain_manager.myInfo.get_j_index(terrain_manager.myInfo.start_pos.z)] = Vector3.Distance(startCell, goalCell);
+
+            while (open.Count > 0)
+            {
+                Vector3 current = Vector3.zero;
+                float weight = Mathf.Infinity;
+                foreach(Vector3 node in open)
+                {
+                    int nodeI = terrain_manager.myInfo.get_i_index(node.x);
+                    int nodeJ = terrain_manager.myInfo.get_j_index(node.z);
+                    if (fScore[nodeI, nodeJ] < weight)
+                    {
+                        weight = fScore[nodeI, nodeJ];
+                        current = node;
+                    }
+                }
+
+                if (current == goalCell)
+                {
+                    List<Vector3> aPath = new List<Vector3>();
+                    aPath.Add(current);
+                    while(true)
+                    {
+                        bool foundKey = false;
+                        foreach (Vector3 key in cameFrom.Keys)
+                        {
+                            if (current == key)
+                            {
+                                foundKey = true;
+                                current = cameFrom[key];
+                                aPath.Insert(0, current);
+                            }
+                        }
+                        if(!foundKey)
+                        {
+                            break;
+                        }
+                    }
+                    return aPath;
+                }
+
+                open.Remove(current);
+                closed.Add(current);
+
+                int currentI = terrain_manager.myInfo.get_i_index(current.x);
+                int currentJ = terrain_manager.myInfo.get_j_index(current.z);
+                for(int i = Mathf.Max(currentI - 1, 0); i <= Mathf.Min(currentI + 1, terrain_manager.myInfo.x_N-1); ++i)
+                {
+                    for (int j = Mathf.Max(currentJ - 1, 0); j <= Mathf.Min(currentJ + 1, terrain_manager.myInfo.z_N-1); ++j)
+                    {
+                        Vector3 neighbour = new Vector3(
+                            terrain_manager.myInfo.get_x_pos(i),
+                            0,
+                            terrain_manager.myInfo.get_z_pos(j)
+                        );
+                        bool alreadyClosed = false;
+                        foreach(Vector3 node in closed)
+                        {
+                            if(node == neighbour)
+                            {
+                                alreadyClosed = true;
+                                break;
+                            }
+                        }
+                        if(alreadyClosed)
+                        {
+
+                            continue;
+                        }
+
+                        float distance = Vector3.Distance(current, neighbour);
+                        if(terrain_manager.myInfo.traversability[i, j] > 0.5f)
+                        {
+                            distance = Mathf.Infinity;
+                        }
+                        float tentative_gScore = gScore[currentI, currentJ] + distance;
+
+                        alreadyClosed = false;
+                        foreach (Vector3 node in open)
+                        {
+                            if (node == neighbour)
+                            {
+                                alreadyClosed = true;
+                                break;
+                            }
+                        }
+                        if (!alreadyClosed)
+                        {
+                            open.Add(neighbour);
+                        }
+                        else if(tentative_gScore >= gScore[i, j])
+                        {
+                            continue;
+                        }
+
+                        bool foundKey = false;
+                        foreach(Vector3 key in cameFrom.Keys)
+                        {
+                            if(key == neighbour)
+                            {
+                                cameFrom[key] = current;
+                                foundKey = true;
+                                break;
+                            }
+                        }
+                        if(!foundKey)
+                        {
+                            cameFrom[neighbour] = current;
+                        }
+                        gScore[i, j] = tentative_gScore;
+                        fScore[i, j] = gScore[i, j] + Vector3.Distance(neighbour, goalCell);
+                    }
+                }
+            }
+            return null;
         }
 
         //Determines delta for the kinematic motion model
