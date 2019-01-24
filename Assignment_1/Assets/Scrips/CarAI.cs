@@ -15,18 +15,22 @@ namespace UnityStandardAssets.Vehicles.Car
 
         private float timeStep;
         private int numberOfSteps;
+        private float time;
+
+        private float steerDirection;
+        private float accelerationDirection;
 
         private float carLength;
-        private float delta;
 
         private TreePoint start;
+        private List<TreePoint> path;
+        private TreePoint nextPoint;
+        private int pathIndex;
 
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
         public ConfigurationSpace configurationSpace;
-
-        private Vector3 randomTestPoint;
 
         private void Awake()
         {
@@ -39,38 +43,79 @@ namespace UnityStandardAssets.Vehicles.Car
 
             InitializeCSpace();
 
-            timeStep = 0.2f;
-            numberOfSteps = 25;
+            timeStep = 0.1f;
+            numberOfSteps = 15;
+            time = 0;
+
+            steerDirection = 0;
+            accelerationDirection = 0;
 
             carLength = FindCarLength();
-            delta = 0;
 
             start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
+            path = new List<TreePoint>();
+            pathIndex = 1;
 
+            //<RRT>
+            Vector3 randomPoint;
+            
             do
             {
-                randomTestPoint = new Vector3(
+                randomPoint = new Vector3(
                     UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
                     0,
                     UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
                 );
             }
-            while (configurationSpace.Collision(randomTestPoint.x, randomTestPoint.z, 0));
-            GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.transform.position = randomTestPoint;
-            cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
-            cube.transform.eulerAngles = new Vector3(0, 0, 0);
-            cube.GetComponent<MeshRenderer>().material.color = Color.blue;
+            while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
 
-            TreePoint endPoint = SimulateMovement(start, randomTestPoint);
+            TreePoint newPoint = SimulateMovement(start, randomPoint);
+            //</RRT>
+
+            nextPoint = path[pathIndex];
         }
 
 
         private void FixedUpdate()
         {
-
+            time += Time.deltaTime;
+            if(time >= timeStep)
+            {
+                time = 0;
+                steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+                accelerationDirection = AccelerationInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+            }
+            if (m_Car.CurrentSpeed >= maxVelocity)
+            {
+                if (accelerationDirection < 0)
+                {
+                    m_Car.Move(-steerDirection, 0f, 0f, 0f);
+                }
+                else
+                {
+                    m_Car.Move(steerDirection, 0f, 0f, 0f);
+                }
+            }
+            else
+            {
+                if(accelerationDirection < 0)
+                {
+                    m_Car.Move(-steerDirection, 0f, accelerationDirection * acceleration, 0f);
+                }
+                else
+                {
+                    m_Car.Move(steerDirection, accelerationDirection * acceleration, 0f, 0f);
+                }
+            }
+            //Update point if close enough to current one
+            if(Vector3.Distance(m_Car.transform.position, nextPoint.position) <= 1)
+            {
+                pathIndex = Mathf.Min(pathIndex + 1, path.Count-1);
+                nextPoint = path[pathIndex];
+            }
         }
 
+        //Simulate movement from a point in the tree to a point in the plane.
         public TreePoint SimulateMovement(TreePoint from, Vector3 to)
         {
             Vector3 position = from.position;
@@ -78,32 +123,46 @@ namespace UnityStandardAssets.Vehicles.Car
             float velocity = from.velocity;
             for(int step = 0; step < numberOfSteps; step++)
             {
+                //Get steering angle
                 float delta = m_Car.m_MaximumSteerAngle * SteerInput(position, theta, to);
                 if(velocity < 0)
                 {
                     delta = -delta;
                 }
-                Debug.Log(delta);
+                if(Mathf.Abs(delta) <= 5)
+                {
+                    delta = 0;
+                }
 
+                //Calculate motion model values according to kinematic car model
                 float xDiff = velocity * Mathf.Sin(Mathf.Deg2Rad * theta);
                 float zDiff = velocity * Mathf.Cos(Mathf.Deg2Rad * theta);
-                float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta);
+                float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta) * Mathf.Rad2Deg;
 
+                //Get new position and orientation using Euler's method
                 position = new Vector3(Euler(position.x, xDiff, timeStep), 0, Euler(position.z, zDiff, timeStep));
                 theta = Euler(theta, thetaDiff, timeStep);
 
-                GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                cube.transform.position = position;
-                cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
-                cube.transform.eulerAngles = new Vector3(0, theta, 0);
-                cube.GetComponent<BoxCollider>().enabled = false;
+                //If collision, this point is not traversable
+                if(configurationSpace.Collision(position.x, position.z, theta))
+                {
+                    return null;
+                }
+
+                //If close enough to end position, stop iterating
+                if(Vector3.Distance(position, to) <= 1)
+                {
+                    break;
+                }
 
                 velocity += Mathf.Clamp(AccelerationInput(position, theta, to) * acceleration * timeStep, -maxVelocity, maxVelocity);
             }
 
-            return new TreePoint(position, theta, velocity);
+            TreePoint result = new TreePoint(position, theta, velocity);
+            return result;
         }
 
+        //Extrapolates the value in the next position given the derivative of the value
         float Euler(float value, float difference, float step)
         {
             return value + difference * step;
