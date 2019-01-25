@@ -24,6 +24,8 @@ namespace UnityStandardAssets.Vehicles.Car
         private float carLength;
 
         private TreePoint start;
+        private List<TreePoint> treePoints;
+        private float shortestPointToGoalDistance;
         private List<TreePoint> path;
         private TreePoint nextPoint;
         private int pathIndex;
@@ -31,7 +33,7 @@ namespace UnityStandardAssets.Vehicles.Car
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
-        public bool visualize = false;
+        public bool visualizeConfigurationSpace = false;
 
         public ConfigurationSpace configurationSpace;
 
@@ -47,7 +49,7 @@ namespace UnityStandardAssets.Vehicles.Car
 
             InitializeCSpace();
 
-            RRTIterations = 40000;
+            RRTIterations = 125000;
             timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
@@ -58,6 +60,8 @@ namespace UnityStandardAssets.Vehicles.Car
             carLength = FindCarLength();
 
             start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
+            treePoints = new List<TreePoint>{start};
+            shortestPointToGoalDistance = Vector3.Distance(start.position, terrain_manager.myInfo.goal_pos);
             path = new List<TreePoint>();
             pathIndex = 1;
 
@@ -107,10 +111,6 @@ namespace UnityStandardAssets.Vehicles.Car
                 pathIndex = Mathf.Min(pathIndex + 1, path.Count-1);
                 nextPoint = path[pathIndex];
             }
-            if(visualize)
-            {
-                VisualizeCSpace();
-            }
         }
 
         public List<TreePoint> RRT()
@@ -122,11 +122,25 @@ namespace UnityStandardAssets.Vehicles.Car
                 Vector3 randomPoint;
                 do
                 {
-                    randomPoint = new Vector3(
-                        UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
-                        0,
-                        UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
-                    );
+                    float probability = UnityEngine.Random.Range(0f, 1f);
+                    if(probability < 0.1f)
+                    {
+                        Vector2 p = UnityEngine.Random.insideUnitCircle * shortestPointToGoalDistance;
+                        randomPoint = new Vector3(
+                            p.x,
+                            0,
+                            p.y
+                        );
+                    }
+                    else
+                    {
+                        randomPoint = new Vector3(
+                            UnityEngine.Random.Range(terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high),
+                            0,
+                            UnityEngine.Random.Range(terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high)
+                        );
+                    }
+
                 }
                 while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
 
@@ -136,6 +150,11 @@ namespace UnityStandardAssets.Vehicles.Car
                 {
                     newPoint.parent = nearPoint;
                     nearPoint.children.Add(newPoint);
+                    treePoints.Add(newPoint);
+                    if(Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) < shortestPointToGoalDistance)
+                    {
+                        shortestPointToGoalDistance = Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos);
+                    }
 
                     if (Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) <= 5)
                     {
@@ -148,17 +167,9 @@ namespace UnityStandardAssets.Vehicles.Car
 
             if(foundGoal)
             {
-                List<TreePoint> goalPath = new List<TreePoint>();
-                goalPath.Add(pathPoint);
-                while(pathPoint.parent != null)
+                List<TreePoint> goalPath = new List<TreePoint>{pathPoint};
+                while (pathPoint.parent != null)
                 {
-                    //Visualize the path
-                    GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    cube.transform.position = new Vector3(pathPoint.position.x, 0.0f, pathPoint.position.z);
-                    cube.transform.localScale = new Vector3(0.5f, 2, 0.5f);
-                    cube.transform.eulerAngles = new Vector3(0, pathPoint.theta, 0);
-                    cube.GetComponent<BoxCollider>().enabled = false;
-
                     goalPath.Insert(0, pathPoint.parent);
                     pathPoint = pathPoint.parent;
                 }
@@ -170,22 +181,15 @@ namespace UnityStandardAssets.Vehicles.Car
         //Finds the nearest tree point to a point.
         public TreePoint NearestNeighbour(Vector3 point)
         {
-            Queue<TreePoint> queue = new Queue<TreePoint>();
-            queue.Enqueue(start);
             float minDistance = Mathf.Infinity;
             TreePoint nearestPoint = null;
-            while(queue.Count > 0)
+            foreach(TreePoint treePoint in treePoints)
             {
-                TreePoint currentPoint = queue.Dequeue();
-                foreach(TreePoint child in currentPoint.children)
-                {
-                    queue.Enqueue(child);
-                }
-                float distance = MeasureDistance(currentPoint.position, point);
+                float distance = MeasureDistance(treePoint.position, point);
                 if(distance < minDistance)
                 {
                     minDistance = distance;
-                    nearestPoint = currentPoint;
+                    nearestPoint = treePoint;
                 }
             }
             return nearestPoint;
@@ -212,7 +216,7 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
                 if(Mathf.Abs(delta) <= 5)
                 {
-                    delta = 0;
+                    delta = 0; //Do we need this?
                 }
 
                 //Calculate motion model values according to kinematic car model
@@ -278,40 +282,6 @@ namespace UnityStandardAssets.Vehicles.Car
             m_Car.transform.rotation = carRotation;
         }
 
-        //Visualizes the configuration space by adding red boxes where the center point of the car cannot go.
-        private void VisualizeCSpace()
-        {
-            GameObject[] cubes = GameObject.FindGameObjectsWithTag("config_cube");
-            foreach (GameObject cube in cubes)
-            {
-                Destroy(cube);
-            }
-
-
-            int num_cubes = 10;
-            float min_x = Mathf.Clamp(m_Car.transform.position.x - num_cubes, terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high);
-            float max_x = Mathf.Clamp(m_Car.transform.position.x + num_cubes, terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high);
-            float min_z = Mathf.Clamp(m_Car.transform.position.z - num_cubes, terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high);
-            float max_z = Mathf.Clamp(m_Car.transform.position.z + num_cubes, terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high);
-            int size = 1;
-
-            for (int i = (int)min_x; i <= (int)max_x; i += size)
-            {
-                for (int j = (int)min_z; j <= (int)max_z; j += size)
-                {
-                    if (configurationSpace.Collision(i, j, m_Car.transform.eulerAngles.y))
-                    {
-                        GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                        cube.transform.position = new Vector3(i, 0.0f, j);
-                        cube.transform.localScale = new Vector3(size, 2, size);
-                        cube.GetComponent<BoxCollider>().enabled = false;
-                        cube.tag = "config_cube";
-                        cube.GetComponent<MeshRenderer>().material.color = Color.red;
-                    }
-                }
-            }
-        }
-
         private float FindCarLength()
         {
             WheelCollider[] wheels = FindObjectsOfType<WheelCollider>();
@@ -326,6 +296,57 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
             }
             return midValue;
+        }
+
+        private void OnDrawGizmos()
+        {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
+            //Show the tree
+            Gizmos.color = Color.blue;
+            for(int i = 0; i < treePoints.Count; ++i)
+            {
+                foreach(TreePoint child in treePoints[i].children)
+                {
+                    Gizmos.DrawLine(treePoints[i].position + Vector3.up*0.75f, child.position + Vector3.up*0.75f);
+                }
+            }
+
+            //Show the path to the goal
+            if(path != null)
+            {
+                Gizmos.color = Color.white;
+                for (int i = 0; i < path.Count - 1; ++i)
+                {
+                    Gizmos.DrawLine(path[i].position + Vector3.up, path[i + 1].position + Vector3.up);
+                }
+            }
+
+            //Visualizes the configuration space by adding red boxes where the center point of the car cannot go.
+            if (visualizeConfigurationSpace)
+            {
+                Gizmos.color = Color.red;
+                int areaWidth = 10;
+                float min_x = Mathf.Clamp(m_Car.transform.position.x - areaWidth, terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high);
+                float max_x = Mathf.Clamp(m_Car.transform.position.x + areaWidth, terrain_manager.myInfo.x_low, terrain_manager.myInfo.x_high);
+                float min_z = Mathf.Clamp(m_Car.transform.position.z - areaWidth, terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high);
+                float max_z = Mathf.Clamp(m_Car.transform.position.z + areaWidth, terrain_manager.myInfo.z_low, terrain_manager.myInfo.z_high);
+                float size = 0.5f;
+
+                for (float i = (int)min_x; i <= (int)max_x; i += size)
+                {
+                    for (float j = (int)min_z; j <= (int)max_z; j += size)
+                    {
+                        if (configurationSpace.Collision(i, j, m_Car.transform.eulerAngles.y))
+                        {
+                            Gizmos.DrawCube(new Vector3(i, 0.0f, j), new Vector3(size, 2, size));
+                        }
+                    }
+                }
+            }
         }
     }
 }
