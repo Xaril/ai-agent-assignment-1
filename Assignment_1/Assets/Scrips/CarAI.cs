@@ -23,8 +23,14 @@ namespace UnityStandardAssets.Vehicles.Car
 
         private float carLength;
 
+        private float world_width;
+        private float world_height;
+        private float gridSize;
+        private int gridAmountX;
+        private int gridAmountZ;
         private TreePoint start;
         private List<TreePoint>[,] treePoints;
+
         private float shortestPointToGoalDistance;
         private List<TreePoint> path;
         private TreePoint nextPoint;
@@ -59,19 +65,28 @@ namespace UnityStandardAssets.Vehicles.Car
 
             carLength = FindCarLength();
 
+            world_width = (terrain_manager.myInfo.x_high - terrain_manager.myInfo.x_low);
+            world_height = (terrain_manager.myInfo.z_high - terrain_manager.myInfo.z_low);
+            gridSize = Mathf.Min(
+                world_width / terrain_manager.myInfo.x_N,
+                world_height / terrain_manager.myInfo.z_N
+            );
+            gridAmountX = (int)(world_width / gridSize);
+            gridAmountZ = (int)(world_height / gridSize);
             start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
-            treePoints = new List<TreePoint>[terrain_manager.myInfo.x_N, terrain_manager.myInfo.z_N];
-            for(int i = 0; i < terrain_manager.myInfo.x_N; ++i)
+            treePoints = new List<TreePoint>[gridAmountX, gridAmountZ];
+            for (int i = 0; i < gridAmountX; ++i)
             {
-                for (int j = 0; j < terrain_manager.myInfo.z_N; ++j)
+                for (int j = 0; j < gridAmountZ; ++j)
                 {
-                    if(terrain_manager.myInfo.traversability[i, j] < 0.5f)
+                    if (NearestNeighbourTraversable(i, j))
                     {
                         treePoints[i, j] = new List<TreePoint>();
                     }
                 }
             }
-            treePoints[terrain_manager.myInfo.get_i_index(start.position.x), terrain_manager.myInfo.get_j_index(start.position.z)].Add(start);
+            treePoints[NearestNeighbourGetIndexI(start.position.x), NearestNeighbourGetIndexJ(start.position.z)].Add(start);
+
             shortestPointToGoalDistance = Vector3.Distance(start.position, terrain_manager.myInfo.goal_pos);
             path = new List<TreePoint>();
             pathIndex = 1;
@@ -165,8 +180,12 @@ namespace UnityStandardAssets.Vehicles.Car
                 {
                     newPoint.parent = nearPoint;
                     nearPoint.children.Add(newPoint);
-                    int newIIndex = terrain_manager.myInfo.get_i_index(newPoint.position.x);
-                    int newJIndex = terrain_manager.myInfo.get_j_index(newPoint.position.z);
+                    int newIIndex = NearestNeighbourGetIndexI(newPoint.position.x);
+                    int newJIndex = NearestNeighbourGetIndexJ(newPoint.position.z);
+                    if(!NearestNeighbourTraversable(newIIndex, newJIndex))
+                    {
+                        continue;
+                    }
                     treePoints[newIIndex, newJIndex].Add(newPoint);
                     if(Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) < shortestPointToGoalDistance)
                     {
@@ -202,13 +221,13 @@ namespace UnityStandardAssets.Vehicles.Car
             float minDistance = Mathf.Infinity;
             TreePoint nearestPoint = null;
 
-            int pointIIndex = terrain_manager.myInfo.get_i_index(point.x);
-            int pointJIndex = terrain_manager.myInfo.get_j_index(point.z);
+            int pointIIndex = NearestNeighbourGetIndexI(point.x);
+            int pointJIndex = NearestNeighbourGetIndexJ(point.z);
 
             //Iterate over grid cells using a queue
             Queue<int[]> queue = new Queue<int[]>();
             //Keep track of cells already visited
-            bool[,] visited = new bool[terrain_manager.myInfo.x_N, terrain_manager.myInfo.z_N];
+            bool[,] visited = new bool[gridAmountX, gridAmountZ];
 
             int[] startCell = { pointIIndex, pointJIndex };
 
@@ -246,7 +265,7 @@ namespace UnityStandardAssets.Vehicles.Car
                     visited[cell[0], cell[1]] = true;
 
                     //No need to check a block that cannot be traversed
-                    if(terrain_manager.myInfo.traversability[cell[0], cell[1]] > 0.5f)
+                    if(!NearestNeighbourTraversable(cell[0], cell[1]))
                     {
                         currentBlock++;
                         if(currentBlock == numberOfBlocks)
@@ -275,7 +294,7 @@ namespace UnityStandardAssets.Vehicles.Car
                             {
                                 queue.Enqueue(new int[] { cell[0] - 1, cell[1] });
                             }
-                            if(cell[0] + 1 < terrain_manager.myInfo.x_N)
+                            if(cell[0] + 1 < gridAmountX)
                             {
                                 queue.Enqueue(new int[] { cell[0] + 1, cell[1] });
                             }
@@ -283,7 +302,7 @@ namespace UnityStandardAssets.Vehicles.Car
                             {
                                 queue.Enqueue(new int[] { cell[0], cell[1] - 1 });
                             }
-                            if(cell[1] + 1 < terrain_manager.myInfo.z_N)
+                            if(cell[1] + 1 < gridAmountZ)
                             {
                                 queue.Enqueue(new int[] { cell[0], cell[1] + 1 });
                             }
@@ -313,6 +332,56 @@ namespace UnityStandardAssets.Vehicles.Car
         private float MeasureDistance(Vector3 a, Vector3 b)
         {
             return Vector3.Distance(a, b);
+        }
+
+        private bool NearestNeighbourTraversable(int i, int j)
+        {
+            if(terrain_manager.myInfo.traversability[
+                terrain_manager.myInfo.get_i_index(NearestNeighbourGetAxisPositionX(i)),
+                terrain_manager.myInfo.get_j_index(NearestNeighbourGetAxisPositionZ(j))
+            ] > 0.5f)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        private float NearestNeighbourGetAxisPositionX(int index)
+        {
+            return gridSize * index + gridSize / 2 + terrain_manager.myInfo.x_low;
+        }
+
+        private float NearestNeighbourGetAxisPositionZ(int index)
+        {
+            return gridSize * index + gridSize / 2 + terrain_manager.myInfo.z_low;
+        }
+
+        private int NearestNeighbourGetIndexI(float x)
+        {
+            int index = (int)Mathf.Floor(gridAmountX * (x - terrain_manager.myInfo.x_low) / world_width);
+            if (index < 0)
+            {
+                index = 0;
+            }
+            else if (index > gridAmountX - 1)
+            {
+                index = gridAmountX - 1;
+            }
+            return index;
+        }
+
+        private int NearestNeighbourGetIndexJ(float z)
+        {
+            int index = (int)Mathf.Floor(gridAmountZ * (z - terrain_manager.myInfo.z_low) / world_height);
+            if (index < 0)
+            {
+                index = 0;
+            }
+            else if (index > gridAmountZ - 1)
+            {
+                index = gridAmountZ - 1;
+            }
+            return index;
         }
 
         //Simulate movement from a point in the tree to a point in the plane.
@@ -422,11 +491,11 @@ namespace UnityStandardAssets.Vehicles.Car
 
             //Show the tree
             Gizmos.color = Color.blue;
-            for(int i = 0; i < terrain_manager.myInfo.x_N; ++i)
+            for(int i = 0; i < gridAmountX; ++i)
             {
-                for(int j = 0; j < terrain_manager.myInfo.z_N; ++j)
+                for(int j = 0; j < gridAmountZ; ++j)
                 {
-                    if(terrain_manager.myInfo.traversability[i, j] < 0.5f)
+                    if(NearestNeighbourTraversable(i, j))
                     {
                         for (int k = 0; k < treePoints[i, j].Count; ++k)
                         {
