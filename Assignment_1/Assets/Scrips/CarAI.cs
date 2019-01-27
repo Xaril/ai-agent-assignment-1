@@ -24,7 +24,7 @@ namespace UnityStandardAssets.Vehicles.Car
         private float carLength;
 
         private TreePoint start;
-        private List<TreePoint> treePoints;
+        private List<TreePoint>[,] treePoints;
         private float shortestPointToGoalDistance;
         private List<TreePoint> path;
         private TreePoint nextPoint;
@@ -49,7 +49,7 @@ namespace UnityStandardAssets.Vehicles.Car
 
             InitializeCSpace();
 
-            RRTIterations = 125000;
+            RRTIterations = 500000;
             timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
@@ -60,7 +60,18 @@ namespace UnityStandardAssets.Vehicles.Car
             carLength = FindCarLength();
 
             start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
-            treePoints = new List<TreePoint>{start};
+            treePoints = new List<TreePoint>[terrain_manager.myInfo.x_N, terrain_manager.myInfo.z_N];
+            for(int i = 0; i < terrain_manager.myInfo.x_N; ++i)
+            {
+                for (int j = 0; j < terrain_manager.myInfo.z_N; ++j)
+                {
+                    if(terrain_manager.myInfo.traversability[i, j] < 0.5f)
+                    {
+                        treePoints[i, j] = new List<TreePoint>();
+                    }
+                }
+            }
+            treePoints[terrain_manager.myInfo.get_i_index(start.position.x), terrain_manager.myInfo.get_j_index(start.position.z)].Add(start);
             shortestPointToGoalDistance = Vector3.Distance(start.position, terrain_manager.myInfo.goal_pos);
             path = new List<TreePoint>();
             pathIndex = 1;
@@ -145,12 +156,18 @@ namespace UnityStandardAssets.Vehicles.Car
                 while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
 
                 TreePoint nearPoint = NearestNeighbour(randomPoint);
+                if(nearPoint == null)
+                {
+                    continue;
+                }
                 TreePoint newPoint = SimulateMovement(nearPoint, randomPoint);
                 if(newPoint != null)
                 {
                     newPoint.parent = nearPoint;
                     nearPoint.children.Add(newPoint);
-                    treePoints.Add(newPoint);
+                    int newIIndex = terrain_manager.myInfo.get_i_index(newPoint.position.x);
+                    int newJIndex = terrain_manager.myInfo.get_j_index(newPoint.position.z);
+                    treePoints[newIIndex, newJIndex].Add(newPoint);
                     if(Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) < shortestPointToGoalDistance)
                     {
                         shortestPointToGoalDistance = Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos);
@@ -181,15 +198,113 @@ namespace UnityStandardAssets.Vehicles.Car
         //Finds the nearest tree point to a point.
         public TreePoint NearestNeighbour(Vector3 point)
         {
+            //Keep track of the closest point
             float minDistance = Mathf.Infinity;
             TreePoint nearestPoint = null;
-            foreach(TreePoint treePoint in treePoints)
+
+            int pointIIndex = terrain_manager.myInfo.get_i_index(point.x);
+            int pointJIndex = terrain_manager.myInfo.get_j_index(point.z);
+
+            //Iterate over grid cells using a queue
+            Queue<int[]> queue = new Queue<int[]>();
+            //Keep track of cells already visited
+            bool[,] visited = new bool[terrain_manager.myInfo.x_N, terrain_manager.myInfo.z_N];
+
+            int[] startCell = { pointIIndex, pointJIndex };
+
+            //Since distance increases in a circle we get more cells every time.
+            //To keep track of how many cells to check before trying to return a
+            //value, we can use a stop block.
+            int[] stopBlock = { -1, -1 };
+
+            queue.Enqueue(startCell);
+            queue.Enqueue(stopBlock);
+
+            //This helps keep track of when to put stop blocks in the queue.
+            int numberOfBlocks = 1;
+            int currentBlock = 0;
+
+            while(queue.Count > 0)
             {
-                float distance = MeasureDistance(treePoint.position, point);
-                if(distance < minDistance)
+                int[] cell = queue.Dequeue();
+
+                //Stop block
+                if(cell[0] == -1 && cell[1] == -1)
                 {
-                    minDistance = distance;
-                    nearestPoint = treePoint;
+                    currentBlock = 0;
+                    numberOfBlocks = queue.Count - 1;
+
+                    //If we have found a point on this level, it is the 
+                    //nearest point so we return it
+                    if(nearestPoint != null)
+                    {
+                        return nearestPoint;
+                    }
+                } 
+                else if(!visited[cell[0],cell[1]]) //Haven't checked the block yet
+                {
+                    visited[cell[0], cell[1]] = true;
+
+                    //No need to check a block that cannot be traversed
+                    if(terrain_manager.myInfo.traversability[cell[0], cell[1]] > 0.5f)
+                    {
+                        currentBlock++;
+                        if(currentBlock == numberOfBlocks)
+                        {
+                            queue.Enqueue(stopBlock);
+                        }
+                    }
+                    else
+                    {
+                        //Look at all points in the cell
+                        foreach(TreePoint treePoint in treePoints[cell[0], cell[1]])
+                        {
+                            float distance = MeasureDistance(treePoint.position, point);
+                            if(distance < minDistance)
+                            {
+                                minDistance = distance;
+                                nearestPoint = treePoint;
+                            }
+                        }
+
+                        //Haven't found a point in this cell, enqueue the enclosing ones
+                        if (nearestPoint == null)
+                        {
+                            currentBlock++;
+                            if(cell[0] - 1 >= 0)
+                            {
+                                queue.Enqueue(new int[] { cell[0] - 1, cell[1] });
+                            }
+                            if(cell[0] + 1 < terrain_manager.myInfo.x_N)
+                            {
+                                queue.Enqueue(new int[] { cell[0] + 1, cell[1] });
+                            }
+                            if(cell[1] - 1 >= 0)
+                            {
+                                queue.Enqueue(new int[] { cell[0], cell[1] - 1 });
+                            }
+                            if(cell[1] + 1 < terrain_manager.myInfo.z_N)
+                            {
+                                queue.Enqueue(new int[] { cell[0], cell[1] + 1 });
+                            }
+                            if(currentBlock == numberOfBlocks)
+                            {
+                                queue.Enqueue(stopBlock);
+                            }
+                        }
+                        else
+                        {
+                            currentBlock++;
+                        }
+                    }
+                }
+                else //Don't have to check already visited blocks
+                {
+                    currentBlock++;
+                    if(currentBlock == numberOfBlocks)
+                    {
+                        queue.Enqueue(stopBlock);
+                    }
                 }
             }
             return nearestPoint;
@@ -307,11 +422,20 @@ namespace UnityStandardAssets.Vehicles.Car
 
             //Show the tree
             Gizmos.color = Color.blue;
-            for(int i = 0; i < treePoints.Count; ++i)
+            for(int i = 0; i < terrain_manager.myInfo.x_N; ++i)
             {
-                foreach(TreePoint child in treePoints[i].children)
+                for(int j = 0; j < terrain_manager.myInfo.z_N; ++j)
                 {
-                    Gizmos.DrawLine(treePoints[i].position + Vector3.up*0.75f, child.position + Vector3.up*0.75f);
+                    if(terrain_manager.myInfo.traversability[i, j] < 0.5f)
+                    {
+                        for (int k = 0; k < treePoints[i, j].Count; ++k)
+                        {
+                            foreach (TreePoint child in treePoints[i, j][k].children)
+                            {
+                                Gizmos.DrawLine(treePoints[i, j][k].position + Vector3.up * 0.75f, child.position + Vector3.up * 0.75f);
+                            }
+                        }
+                    }
                 }
             }
 
