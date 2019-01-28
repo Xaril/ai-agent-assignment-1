@@ -429,9 +429,18 @@ namespace UnityStandardAssets.Vehicles.Car
                 float zDiff = velocity * Mathf.Cos(Mathf.Deg2Rad * theta);
                 float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta) * Mathf.Rad2Deg;
 
+                
+
                 //Get new position and orientation using Euler's method
                 position = new Vector3(Euler(position.x, xDiff, timeStep), 0, Euler(position.z, zDiff, timeStep));
                 theta = Euler(theta, thetaDiff, timeStep);
+
+                //Get new position and orientation using RK4
+                /* float[] nextState = RK4Step(position.x, position.z, theta, delta, carLength, velocity, timeStep);
+                position.x = nextState[0];
+                position.z = nextState[1];
+                theta = nextState[2];
+                */
 
                 //If collision, this point is not traversable
                 if(configurationSpace.Collision(position.x, position.z, theta))
@@ -457,6 +466,32 @@ namespace UnityStandardAssets.Vehicles.Car
         {
             return value + difference * step;
         }
+
+        private float[] FPrime(float theta, float delta, float carLenght, float velocity)
+        {
+            float xDiff = velocity * Mathf.Sin(Mathf.Deg2Rad * theta);
+            float zDiff = velocity * Mathf.Cos(Mathf.Deg2Rad * theta);
+            float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta) * Mathf.Rad2Deg;
+            float[] diff = new float[] { xDiff, zDiff, thetaDiff};
+            return diff;
+
+        }
+
+        private float [] RK4Step(float x, float z, float theta, float delta, float carLenght, float velocity, float timeStep) 
+        {
+            float[] k1 = FPrime(theta, delta, carLenght, velocity);
+            float[] k2 = FPrime(theta + k1[2] * (timeStep / 2), delta, carLenght, velocity);
+            float[] k3 = FPrime(theta + k2[2] * (timeStep / 2), delta, carLenght, velocity);
+            float[] k4 = FPrime(theta + k3[2] * (timeStep), delta, carLenght, velocity);
+
+            float[] newState = new float[] { 0, 0, 0 };
+
+            float[] oldState = new float[] { x, z, theta };
+            for(int i = 0; i < 3; i++){
+                newState[i] = oldState[i] + (timeStep / 6) * (k1[i] + k2[i] + k3[i] + k4[i]);
+                }
+            return newState;
+            }
 
         //Determines delta for the kinematic motion model
         private float SteerInput(Vector3 position, float theta, Vector3 point)
