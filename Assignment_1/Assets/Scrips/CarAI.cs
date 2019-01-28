@@ -290,21 +290,16 @@ namespace UnityStandardAssets.Vehicles.Car
                         if (nearestPoint == null)
                         {
                             currentBlock++;
-                            if(cell[0] - 1 >= 0)
+                            for(int i = -1; i <= 1; ++i)
                             {
-                                queue.Enqueue(new int[] { cell[0] - 1, cell[1] });
-                            }
-                            if(cell[0] + 1 < gridAmountX)
-                            {
-                                queue.Enqueue(new int[] { cell[0] + 1, cell[1] });
-                            }
-                            if(cell[1] - 1 >= 0)
-                            {
-                                queue.Enqueue(new int[] { cell[0], cell[1] - 1 });
-                            }
-                            if(cell[1] + 1 < gridAmountZ)
-                            {
-                                queue.Enqueue(new int[] { cell[0], cell[1] + 1 });
+                                for(int j = -1; j <= 1; ++j)
+                                {
+                                    if(cell[0] + i >= 0 && cell[0] + i < gridAmountX &&
+                                       cell[1] + j >= 0 && cell[1] + j < gridAmountZ)
+                                    {
+                                        queue.Enqueue(new int[] { cell[0] + i, cell[1] + j });
+                                    }
+                                }
                             }
                             if(currentBlock == numberOfBlocks)
                             {
