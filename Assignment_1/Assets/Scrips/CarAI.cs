@@ -36,6 +36,9 @@ namespace UnityStandardAssets.Vehicles.Car
         private TreePoint nextPoint;
         private int pathIndex;
 
+        private bool crashed;
+        private float crashTime;
+
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
@@ -45,12 +48,12 @@ namespace UnityStandardAssets.Vehicles.Car
 
         private void Awake()
         {
-            Time.timeScale = 2;
+            Time.timeScale = 1;
             // get the car controller
             m_Car = GetComponent<CarController>();
             terrain_manager = terrain_manager_game_object.GetComponent<TerrainManager>();
 
-            maxVelocity = 6;
+            maxVelocity = 50;
             acceleration = 0.2f;
 
             InitializeCSpace();
@@ -98,44 +101,67 @@ namespace UnityStandardAssets.Vehicles.Car
                 Debug.Log("No path found!");
             }
             nextPoint = path[pathIndex];
+
+            crashed = false;
+            crashTime = 0;
         }
 
         private void FixedUpdate()
         {
             time += Time.deltaTime;
-            if(time >= timeStep)
+
+            if(!crashed)
             {
-                time = 0;
-                steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
-                accelerationDirection = AccelerationInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
-            }
-            if (m_Car.CurrentSpeed >= maxVelocity)
-            {
-                if (accelerationDirection < 0)
+                if (time >= timeStep)
                 {
-                    m_Car.Move(-steerDirection, 0f, 0f, 0f);
+                    time = 0;
+                    steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+                    accelerationDirection = AccelerationInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+                }
+                if (m_Car.CurrentSpeed >= maxVelocity)
+                {
+                    if (accelerationDirection < 0)
+                    {
+                        m_Car.Move(-steerDirection, 0f, 0f, 0f);
+                    }
+                    else
+                    {
+                        m_Car.Move(steerDirection, 0f, 0f, 0f);
+                    }
                 }
                 else
                 {
-                    m_Car.Move(steerDirection, 0f, 0f, 0f);
+                    if (accelerationDirection < 0)
+                    {
+                        m_Car.Move(-steerDirection, 0f, accelerationDirection * acceleration, 0f);
+                    }
+                    else
+                    {
+                        m_Car.Move(steerDirection, accelerationDirection * acceleration, 0f, 0f);
+                    }
+                }
+                //Update point if close enough to current one
+                if (Vector3.Distance(m_Car.transform.position, nextPoint.position) <= 3f)
+                {
+                    pathIndex = Mathf.Min(pathIndex + 1, path.Count - 1);
+                    nextPoint = path[pathIndex];
                 }
             }
             else
             {
-                if(accelerationDirection < 0)
+                crashTime += Time.deltaTime;
+                if(crashTime >= 2)
                 {
-                    m_Car.Move(-steerDirection, 0f, accelerationDirection * acceleration, 0f);
+                    crashed = false;
+                    crashTime = 0;
                 }
                 else
                 {
-                    m_Car.Move(steerDirection, accelerationDirection * acceleration, 0f, 0f);
+                    if(m_Car.CurrentSpeed < maxVelocity)
+                    {
+                        m_Car.Move(0, 0, -acceleration*2, 0);
+                    }
                 }
-            }
-            //Update point if close enough to current one
-            if(Vector3.Distance(m_Car.transform.position, nextPoint.position) <= 1)
-            {
-                pathIndex = Mathf.Min(pathIndex + 1, path.Count-1);
-                nextPoint = path[pathIndex];
             }
         }
 
@@ -475,6 +501,11 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
             }
             return midValue;
+        }
+
+        private void OnCollisionEnter(Collision collision)
+        {
+            crashed = true;
         }
 
         private void OnDrawGizmos()
