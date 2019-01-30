@@ -20,6 +20,8 @@ namespace UnityStandardAssets.Vehicles.Car
 
         private float steerDirection;
         private float accelerationDirection;
+        private float brake;
+        private float handBrake;
 
         private float carLength;
 
@@ -40,11 +42,15 @@ namespace UnityStandardAssets.Vehicles.Car
 
         private bool crashed;
         private float crashTime;
+        private float crashCheckTime;
+        private float crashDirection;
+        private Vector3 previousPosition;
 
         public GameObject terrain_manager_game_object;
         TerrainManager terrain_manager;
 
         public bool visualizeConfigurationSpace = false;
+        public bool visualizeEntireTree = false;
 
         public ConfigurationSpace configurationSpace;
 
@@ -55,18 +61,20 @@ namespace UnityStandardAssets.Vehicles.Car
             m_Car = GetComponent<CarController>();
             terrain_manager = terrain_manager_game_object.GetComponent<TerrainManager>();
 
-            maxVelocity = 50;
-            acceleration = 0.2f;
+            maxVelocity = 150;
+            acceleration = 1f;
 
             InitializeCSpace();
 
-            RRTIterations = 200000;
+            RRTIterations = 500000;
             timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
 
             steerDirection = 0;
             accelerationDirection = 0;
+            brake = 0;
+            handBrake = 0;
 
             carLength = FindCarLength();
 
@@ -108,64 +116,118 @@ namespace UnityStandardAssets.Vehicles.Car
 
             crashed = false;
             crashTime = 0;
+            crashCheckTime = 0.5f;
+            crashDirection = 0;
+            previousPosition = Vector3.up;
         }
 
         private void FixedUpdate()
         {
-            time += Time.deltaTime;
-
             if(!crashed)
             {
-                if (time >= timeStep)
+                time += Time.deltaTime;
+                if (time >= crashCheckTime && Vector3.Distance(m_Car.transform.position, terrain_manager.myInfo.start_pos) > 5)
                 {
                     time = 0;
-                    steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
-                    accelerationDirection = AccelerationInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
-                }
-                if (m_Car.CurrentSpeed >= maxVelocity)
-                {
-                    if (accelerationDirection < 0)
+                    if (Vector3.Distance(previousPosition, m_Car.transform.position) < 0.1f)
                     {
-                        m_Car.Move(-steerDirection, 0f, 0f, 0f);
+                        crashed = true;
+                        pathIndex--;
+                        nextPoint = path[pathIndex];
+                        if(Physics.BoxCast(
+                            m_Car.transform.position, 
+                            new Vector3(configurationSpace.BoxSize.x/2, configurationSpace.BoxSize.y/2, 0.5f),
+                            m_Car.transform.forward,
+                            Quaternion.LookRotation(m_Car.transform.forward),
+                            configurationSpace.BoxSize.z/2
+                        ))
+                        {
+                            crashDirection = -1;
+                        }
+                        else
+                        {
+                            crashDirection = 1;
+                        }
+
                     }
                     else
                     {
-                        m_Car.Move(steerDirection, 0f, 0f, 0f);
+                        previousPosition = m_Car.transform.position;
                     }
+                }
+
+                steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+                if (Mathf.Abs(steerDirection) < 0.2f)
+                {
+                    steerDirection = 0;
+                }
+                brake = 0;
+                if (Mathf.Abs(steerDirection) > 0.8f && m_Car.CurrentSpeed > maxVelocity / 10)
+                {
+                    accelerationDirection = 0;
+                    handBrake = 1;
                 }
                 else
                 {
-                    if (accelerationDirection < 0)
+                    accelerationDirection = AccelerationInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+                    handBrake = 0;
+                }
+                if (pathIndex < path.Count - 1)
+                {
+                    int stepsToCheck = Mathf.Min(3 + (int)(m_Car.CurrentSpeed * 1.6f * 1.6f * m_Car.CurrentSpeed / 500), path.Count - 1 - pathIndex);
+                    for (int i = 1; i <= stepsToCheck; ++i)
                     {
-                        m_Car.Move(-steerDirection, 0f, accelerationDirection * acceleration, 0f);
-                    }
-                    else
-                    {
-                        m_Car.Move(steerDirection, accelerationDirection * acceleration, 0f, 0f);
+                        float steerCheck = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, path[pathIndex + i].position);
+                        if (Mathf.Abs(steerCheck) > 0.95f && (m_Car.CurrentSpeed * 1.6f * 1.6f * m_Car.CurrentSpeed) >= Vector3.Distance(m_Car.transform.position, path[pathIndex + i].position) * 250 * 0.65f)
+                        {
+                            accelerationDirection = 0;
+                            brake = 1;
+                            break;
+                        }
                     }
                 }
-                //Update point if close enough to current one
-                if (Vector3.Distance(m_Car.transform.position, nextPoint.position) <= 3f)
+
+                if (m_Car.CurrentSpeed >= maxVelocity)
                 {
-                    pathIndex = Mathf.Min(pathIndex + 1, path.Count - 1);
-                    nextPoint = path[pathIndex];
+                    accelerationDirection = 0;
+                }
+
+                if (accelerationDirection < 0)
+                {
+                    m_Car.Move(-steerDirection, brake, accelerationDirection * acceleration, handBrake);
+                }
+                else
+                {
+                    m_Car.Move(steerDirection, accelerationDirection * acceleration, -brake, handBrake);
                 }
             }
             else
             {
                 crashTime += Time.deltaTime;
-                if(crashTime >= 2)
+                if(crashTime <= 1f)
                 {
-                    crashed = false;
-                    crashTime = 0;
+                    steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
+                    if (crashDirection > 0)
+                    {
+                        m_Car.Move(steerDirection, acceleration, 0, 0);
+                    }
+                    else
+                    {
+                        m_Car.Move(-steerDirection, 0, -acceleration, 0);
+                    }
                 }
                 else
                 {
-                    if(m_Car.CurrentSpeed < maxVelocity)
-                    {
-                        m_Car.Move(0, 0, -acceleration*2, 0);
-                    }
+                    crashTime = 0;
+                    crashed = false;
                 }
+            }
+
+            //Update point if close enough to current one
+            if (Vector3.Distance(m_Car.transform.position, nextPoint.position) <= 5 + m_Car.CurrentSpeed / 40)
+            {
+                pathIndex = Mathf.Min(pathIndex + 1, path.Count - 1);
+                nextPoint = path[pathIndex];
             }
         }
 
@@ -229,7 +291,7 @@ namespace UnityStandardAssets.Vehicles.Car
                         TreePoint p = SimulateMovement(point, newPoint.position, 3);
                         if(p != null)
                         {
-                            if (Vector3.Distance(p.position, newPoint.position) <= 0.5f && p.cost < minCost)
+                            if (Vector3.Distance(p.position, newPoint.position) <= 0.1f && p.cost < minCost)
                             {
                                 minCost = p.cost;
                                 minPoint = point;
@@ -259,7 +321,7 @@ namespace UnityStandardAssets.Vehicles.Car
                             pathPoint = newPoint;
                         }
                         goalFoundAmount++;
-                        if(goalFoundAmount >= 30)
+                        if(goalFoundAmount >= 10)
                         {
                             break;
                         }
@@ -475,13 +537,20 @@ namespace UnityStandardAssets.Vehicles.Car
             {
                 //Get steering angle
                 float delta = m_Car.m_MaximumSteerAngle * SteerInput(position, theta, to);
+                float braking = 1;
                 if(AccelerationInput(position, theta, to) < 0)
                 {
                     delta = -delta;
                 }
-                if(Mathf.Abs(delta) <= 10)
+                if(Mathf.Abs(delta) <= 0.4f*m_Car.m_MaximumSteerAngle)
                 {
                     delta = 0; //Do we need this?
+                } else if(Mathf.Abs(delta) > 0.8f*m_Car.m_MaximumSteerAngle)
+                {
+                    if(Mathf.Abs(velocity) > maxVelocity / 10)
+                    {
+                        braking = -1;
+                    }
                 }
 
                 //Calculate motion model values according to kinematic car model
@@ -511,12 +580,12 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
 
                 //If close enough to end position, stop iterating
-                if(Vector3.Distance(position, to) <= 0.5f)
+                if(Vector3.Distance(position, to) <= 0.1f)
                 {
                     break;
                 }
 
-                velocity += Mathf.Clamp(AccelerationInput(position, theta, to) * acceleration * timeStep, -maxVelocity, maxVelocity);
+                velocity += Mathf.Clamp(AccelerationInput(position, theta, to) * acceleration * timeStep * braking, -maxVelocity, maxVelocity);
             }
 
             TreePoint result = new TreePoint(position, theta, velocity, cost);
@@ -600,11 +669,6 @@ namespace UnityStandardAssets.Vehicles.Car
             return midValue;
         }
 
-        private void OnCollisionEnter(Collision collision)
-        {
-            crashed = true;
-        }
-
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying)
@@ -613,18 +677,21 @@ namespace UnityStandardAssets.Vehicles.Car
             }
 
             //Show the tree
-            Gizmos.color = Color.blue;
-            for(int i = 0; i < gridAmountX; ++i)
+            if(visualizeEntireTree)
             {
-                for(int j = 0; j < gridAmountZ; ++j)
+                Gizmos.color = Color.blue;
+                for (int i = 0; i < gridAmountX; ++i)
                 {
-                    if(NearestNeighbourTraversable(i, j))
+                    for (int j = 0; j < gridAmountZ; ++j)
                     {
-                        for (int k = 0; k < treePoints[i, j].Count; ++k)
+                        if (NearestNeighbourTraversable(i, j))
                         {
-                            foreach (TreePoint child in treePoints[i, j][k].children)
+                            for (int k = 0; k < treePoints[i, j].Count; ++k)
                             {
-                                Gizmos.DrawLine(treePoints[i, j][k].position + Vector3.up * 0.75f, child.position + Vector3.up * 0.75f);
+                                foreach (TreePoint child in treePoints[i, j][k].children)
+                                {
+                                    Gizmos.DrawLine(treePoints[i, j][k].position + Vector3.up * 0.75f, child.position + Vector3.up * 0.75f);
+                                }
                             }
                         }
                     }
