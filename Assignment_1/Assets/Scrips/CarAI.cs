@@ -30,11 +30,13 @@ namespace UnityStandardAssets.Vehicles.Car
         private int gridAmountZ;
         private TreePoint start;
         private List<TreePoint>[,] treePoints;
+        private int treeSize;
 
         private float shortestPointToGoalDistance;
         private List<TreePoint> path;
         private TreePoint nextPoint;
         private int pathIndex;
+        private int goalFoundAmount;
 
         private bool crashed;
         private float crashTime;
@@ -58,7 +60,7 @@ namespace UnityStandardAssets.Vehicles.Car
 
             InitializeCSpace();
 
-            RRTIterations = 500000;
+            RRTIterations = 200000;
             timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
@@ -76,7 +78,7 @@ namespace UnityStandardAssets.Vehicles.Car
             );
             gridAmountX = (int)(world_width / gridSize);
             gridAmountZ = (int)(world_height / gridSize);
-            start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0);
+            start = new TreePoint(terrain_manager.myInfo.start_pos, m_Car.transform.eulerAngles.y, 0, 0);
             treePoints = new List<TreePoint>[gridAmountX, gridAmountZ];
             for (int i = 0; i < gridAmountX; ++i)
             {
@@ -89,10 +91,12 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
             }
             treePoints[NearestNeighbourGetIndexI(start.position.x), NearestNeighbourGetIndexJ(start.position.z)].Add(start);
+            treeSize = 1;
 
             shortestPointToGoalDistance = Vector3.Distance(start.position, terrain_manager.myInfo.goal_pos);
             path = new List<TreePoint>();
             pathIndex = 1;
+            goalFoundAmount = 0;
 
             path = RRT();
 
@@ -174,7 +178,7 @@ namespace UnityStandardAssets.Vehicles.Car
                 Vector3 randomPoint;
                 do
                 {
-                    float probability = UnityEngine.Random.Range(0f, 1f);
+                    float probability = foundGoal ? 1 : UnityEngine.Random.Range(0f, 1f);
                     if(probability < 0.1f)
                     {
                         Vector2 p = UnityEngine.Random.insideUnitCircle * shortestPointToGoalDistance;
@@ -196,33 +200,69 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
                 while (configurationSpace.Collision(randomPoint.x, randomPoint.z, 0));
 
-                TreePoint nearPoint = NearestNeighbour(randomPoint);
+                List<TreePoint> nearestPoints = kNearestNeighbours(randomPoint, 1);
+                TreePoint nearPoint = nearestPoints.Count > 0 ? nearestPoints[0] : null;
                 if(nearPoint == null)
                 {
                     continue;
                 }
-                TreePoint newPoint = SimulateMovement(nearPoint, randomPoint);
+                TreePoint newPoint = SimulateMovement(nearPoint, randomPoint, 1);
                 if(newPoint != null)
                 {
-                    newPoint.parent = nearPoint;
-                    nearPoint.children.Add(newPoint);
+                    //Check traversability
                     int newIIndex = NearestNeighbourGetIndexI(newPoint.position.x);
                     int newJIndex = NearestNeighbourGetIndexJ(newPoint.position.z);
                     if(!NearestNeighbourTraversable(newIIndex, newJIndex))
                     {
                         continue;
                     }
+                    nearestPoints = kNearestNeighbours(newPoint.position, Mathf.Min(10 + treeSize/1000, treeSize));
                     treePoints[newIIndex, newJIndex].Add(newPoint);
-                    if(Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) < shortestPointToGoalDistance)
+                    treeSize++;
+
+                    //RRT*
+                    TreePoint minPoint = nearPoint;
+                    float minCost = newPoint.cost;
+
+                    foreach(TreePoint point in nearestPoints)
+                    {
+                        TreePoint p = SimulateMovement(point, newPoint.position, 3);
+                        if(p != null)
+                        {
+                            if (Vector3.Distance(p.position, newPoint.position) <= 0.5f && p.cost < minCost)
+                            {
+                                minCost = p.cost;
+                                minPoint = point;
+                            }
+                        }
+                    }
+
+                    newPoint.parent = minPoint;
+                    minPoint.children.Add(newPoint);
+
+                    //Update value for sampling heuristic
+                    if (Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) < shortestPointToGoalDistance)
                     {
                         shortestPointToGoalDistance = Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos);
                     }
 
+                    //Found goal
                     if (Vector3.Distance(newPoint.position, terrain_manager.myInfo.goal_pos) <= 5)
                     {
                         foundGoal = true;
-                        pathPoint = newPoint;
-                        break;
+                        if(pathPoint == null)
+                        {
+                            pathPoint = newPoint;
+                        }
+                        else if (newPoint.cost < pathPoint.cost)
+                        {
+                            pathPoint = newPoint;
+                        }
+                        goalFoundAmount++;
+                        if(goalFoundAmount >= 30)
+                        {
+                            break;
+                        }
                     }
                 }
             }
@@ -241,11 +281,11 @@ namespace UnityStandardAssets.Vehicles.Car
         }
 
         //Finds the nearest tree point to a point.
-        public TreePoint NearestNeighbour(Vector3 point)
+        public List<TreePoint> kNearestNeighbours(Vector3 point, int k)
         {
             //Keep track of the closest point
-            float minDistance = Mathf.Infinity;
-            TreePoint nearestPoint = null;
+            List<float> minDistances = new List<float>();
+            List<TreePoint> nearestPoints = new List<TreePoint>();
 
             int pointIIndex = NearestNeighbourGetIndexI(point.x);
             int pointJIndex = NearestNeighbourGetIndexJ(point.z);
@@ -281,9 +321,9 @@ namespace UnityStandardAssets.Vehicles.Car
 
                     //If we have found a point on this level, it is the 
                     //nearest point so we return it
-                    if(nearestPoint != null)
+                    if(nearestPoints.Count == k)
                     {
-                        return nearestPoint;
+                        return nearestPoints;
                     }
                 } 
                 else if(!visited[cell[0],cell[1]]) //Haven't checked the block yet
@@ -305,15 +345,34 @@ namespace UnityStandardAssets.Vehicles.Car
                         foreach(TreePoint treePoint in treePoints[cell[0], cell[1]])
                         {
                             float distance = MeasureDistance(treePoint.position, point);
-                            if(distance < minDistance)
+                            if(nearestPoints.Count < k)
                             {
-                                minDistance = distance;
-                                nearestPoint = treePoint;
+                                nearestPoints.Add(treePoint);
+                                minDistances.Add(distance);
                             }
+                            else
+                            {
+                                int maxIndex = 0;
+                                float maxDistance = 0;
+                                for (int i = 0; i < k; ++i)
+                                {
+                                    if(minDistances[i] > maxDistance)
+                                    {
+                                        maxIndex = i;
+                                        maxDistance = minDistances[i];
+                                    }
+                                }
+                                if(distance < minDistances[maxIndex])
+                                {
+                                    minDistances[maxIndex] = distance;
+                                    nearestPoints[maxIndex] = treePoint;
+                                }
+                            }
+
                         }
 
-                        //Haven't found a point in this cell, enqueue the enclosing ones
-                        if (nearestPoint == null)
+                        //Haven't found enough points in this cell, enqueue the enclosing ones
+                        if (nearestPoints.Count < k)
                         {
                             currentBlock++;
                             for(int i = -1; i <= 1; ++i)
@@ -347,7 +406,7 @@ namespace UnityStandardAssets.Vehicles.Car
                     }
                 }
             }
-            return nearestPoint;
+            return nearestPoints;
         }
 
         private float MeasureDistance(Vector3 a, Vector3 b)
@@ -406,12 +465,13 @@ namespace UnityStandardAssets.Vehicles.Car
         }
 
         //Simulate movement from a point in the tree to a point in the plane.
-        public TreePoint SimulateMovement(TreePoint from, Vector3 to)
+        public TreePoint SimulateMovement(TreePoint from, Vector3 to, int timeFactor)
         {
             Vector3 position = from.position;
             float theta = from.theta;
             float velocity = from.velocity;
-            for(int step = 0; step < numberOfSteps; step++)
+            float cost = from.cost;
+            for(int step = 0; step < timeFactor*numberOfSteps; step++)
             {
                 //Get steering angle
                 float delta = m_Car.m_MaximumSteerAngle * SteerInput(position, theta, to);
@@ -419,7 +479,7 @@ namespace UnityStandardAssets.Vehicles.Car
                 {
                     delta = -delta;
                 }
-                if(Mathf.Abs(delta) <= 5)
+                if(Mathf.Abs(delta) <= 10)
                 {
                     delta = 0; //Do we need this?
                 }
@@ -429,10 +489,12 @@ namespace UnityStandardAssets.Vehicles.Car
                 float zDiff = velocity * Mathf.Cos(Mathf.Deg2Rad * theta);
                 float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta) * Mathf.Rad2Deg;
 
-                
+
 
                 //Get new position and orientation using Euler's method
-                position = new Vector3(Euler(position.x, xDiff, timeStep), 0, Euler(position.z, zDiff, timeStep));
+                Vector3 newPosition = new Vector3(Euler(position.x, xDiff, timeStep), 0, Euler(position.z, zDiff, timeStep));
+                cost += Vector3.Distance(position, newPosition);
+                position = newPosition;
                 theta = Euler(theta, thetaDiff, timeStep);
 
                 //Get new position and orientation using RK4
@@ -449,7 +511,7 @@ namespace UnityStandardAssets.Vehicles.Car
                 }
 
                 //If close enough to end position, stop iterating
-                if(Vector3.Distance(position, to) <= 1)
+                if(Vector3.Distance(position, to) <= 0.5f)
                 {
                     break;
                 }
@@ -457,7 +519,7 @@ namespace UnityStandardAssets.Vehicles.Car
                 velocity += Mathf.Clamp(AccelerationInput(position, theta, to) * acceleration * timeStep, -maxVelocity, maxVelocity);
             }
 
-            TreePoint result = new TreePoint(position, theta, velocity);
+            TreePoint result = new TreePoint(position, theta, velocity, cost);
             return result;
         }
 
