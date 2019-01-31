@@ -14,6 +14,9 @@ namespace UnityStandardAssets.Vehicles.Car
         public float acceleration;
 
         private int RRTIterations;
+        private int maxDistTarget;
+        private int maxTimesFoundGoal;
+        private int maxShortcutAngle;
         private float timeStep;
         private int numberOfSteps;
         private float time;
@@ -66,7 +69,10 @@ namespace UnityStandardAssets.Vehicles.Car
 
             InitializeCSpace();
 
-            RRTIterations = 500000;
+            RRTIterations = 500000;     // Limits the number of iterations allowed in the RRT before running the car.
+            maxTimesFoundGoal = 100;    // Limits the times that we find goal before running the car.
+            maxShortcutAngle = 5;       // Angle deviance accepted for points that can give a straight line shortcut.
+            maxDistTarget = 3;          // Maximum accepted distance from a target point.
             timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
@@ -165,7 +171,7 @@ namespace UnityStandardAssets.Vehicles.Car
                         float angle = Vector3.Angle(m_Car.transform.forward, direction);
 
                         //If somewhat straight to point on path, check if it is possible to go there
-                        if (angle <= 5 && Quaternion.Angle(Quaternion.Euler(0, path[i].theta, 0), Quaternion.LookRotation(direction)) <= 15)
+                        if (angle <= maxShortcutAngle && Quaternion.Angle(Quaternion.Euler(0, path[i].theta, 0), Quaternion.LookRotation(direction)) <= maxShortcutAngle)
                         {
                             bool collision = false;
                             for(float h = 0; h <= 1; h += 0.005f)
@@ -264,7 +270,7 @@ namespace UnityStandardAssets.Vehicles.Car
             }
 
             //Update point if close enough to current one
-            if (Vector3.Distance(m_Car.transform.position, nextPoint.position) <= 5 + m_Car.CurrentSpeed / 40)
+            if (Vector3.Distance(m_Car.transform.position, nextPoint.position) <= maxDistTarget + m_Car.CurrentSpeed / 40)
             {
                 pathIndex = Mathf.Min(pathIndex + 1, path.Count - 1);
                 nextPoint = path[pathIndex];
@@ -361,8 +367,9 @@ namespace UnityStandardAssets.Vehicles.Car
                             pathPoint = newPoint;
                         }
                         goalFoundAmount++;
-                        if(goalFoundAmount >= 10)
+                        if(goalFoundAmount >= maxTimesFoundGoal)
                         {
+                            Debug.Log("Found goal " + maxTimesFoundGoal + "  times, stopping.");
                             break;
                         }
                     }
@@ -377,8 +384,10 @@ namespace UnityStandardAssets.Vehicles.Car
                     goalPath.Insert(0, pathPoint.parent);
                     pathPoint = pathPoint.parent;
                 }
+                Debug.Log("Reached " + RRTIterations + " RRT-iterations with at least one goal, stopping.");
                 return goalPath;
             }
+            Debug.Log("Reached " + RRTIterations + " RRT-iterations but found no goal, stopping.");
             return null;
         }
 
@@ -592,26 +601,25 @@ namespace UnityStandardAssets.Vehicles.Car
                         braking = -1;
                     }
                 }
-
+                /*
                 //Calculate motion model values according to kinematic car model
                 float xDiff = velocity * Mathf.Sin(Mathf.Deg2Rad * theta);
                 float zDiff = velocity * Mathf.Cos(Mathf.Deg2Rad * theta);
                 float thetaDiff = velocity / carLength * Mathf.Tan(Mathf.Deg2Rad * delta) * Mathf.Rad2Deg;
-
-
 
                 //Get new position and orientation using Euler's method
                 Vector3 newPosition = new Vector3(Euler(position.x, xDiff, timeStep), 0, Euler(position.z, zDiff, timeStep));
                 cost += Vector3.Distance(position, newPosition);
                 position = newPosition;
                 theta = Euler(theta, thetaDiff, timeStep);
+                */
 
                 //Get new position and orientation using RK4
-                /* float[] nextState = RK4Step(position.x, position.z, theta, delta, carLength, velocity, timeStep);
+                float[] nextState = RK4Step(position.x, position.z, theta, delta, carLength, velocity, timeStep);
                 position.x = nextState[0];
                 position.z = nextState[1];
                 theta = nextState[2];
-                */
+                
 
                 //If collision, this point is not traversable
                 if(configurationSpace.Collision(position.x, position.z, theta))
