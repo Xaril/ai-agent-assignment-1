@@ -132,8 +132,6 @@ namespace UnityStandardAssets.Vehicles.Car
                     if (Vector3.Distance(previousPosition, m_Car.transform.position) < 0.1f)
                     {
                         crashed = true;
-                        pathIndex--;
-                        nextPoint = path[pathIndex];
                         if(Physics.BoxCast(
                             m_Car.transform.position, 
                             new Vector3(configurationSpace.BoxSize.x/2, configurationSpace.BoxSize.y/2, 0.5f),
@@ -156,6 +154,41 @@ namespace UnityStandardAssets.Vehicles.Car
                     }
                 }
 
+
+                //Improve path by straightening unnecessary curves
+                if (pathIndex < path.Count - 1)
+                {
+                    for (int i = path.Count - 1; i >= pathIndex + 1; --i)
+                    {
+                        Vector3 position = m_Car.transform.position;
+                        Vector3 direction = path[i].position - position;
+                        float angle = Vector3.Angle(m_Car.transform.forward, direction);
+
+                        //If somewhat straight to point on path, check if it is possible to go there
+                        if (angle <= 5 && Quaternion.Angle(Quaternion.Euler(0, path[i].theta, 0), Quaternion.LookRotation(direction)) <= 15)
+                        {
+                            bool collision = false;
+                            for(float h = 0; h <= 1; h += 0.005f)
+                            {
+                                float x = (position + direction * h).x;
+                                float z = (position + direction * h).z;
+                                if (configurationSpace.Collision(x, z, Quaternion.LookRotation(direction).y)) 
+                                {
+                                    collision = true;
+                                }
+                            }
+
+                            //No collision, go to this point instead
+                            if(!collision)
+                            {
+                                nextPoint = path[pathIndex];
+                                pathIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 steerDirection = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, nextPoint.position);
                 if (Mathf.Abs(steerDirection) < 0.2f)
                 {
@@ -165,7 +198,14 @@ namespace UnityStandardAssets.Vehicles.Car
                 if (Mathf.Abs(steerDirection) > 0.8f && m_Car.CurrentSpeed > maxVelocity / 10)
                 {
                     accelerationDirection = 0;
-                    handBrake = 1;
+                    if(m_Car.CurrentSpeed > maxVelocity / 5)
+                    {
+                        handBrake = 1;
+                    }
+                    else
+                    {
+                        handBrake = 0;
+                    }
                 }
                 else
                 {
@@ -178,7 +218,7 @@ namespace UnityStandardAssets.Vehicles.Car
                     for (int i = 1; i <= stepsToCheck; ++i)
                     {
                         float steerCheck = SteerInput(m_Car.transform.position, m_Car.transform.eulerAngles.y, path[pathIndex + i].position);
-                        if (Mathf.Abs(steerCheck) > 0.95f && (m_Car.CurrentSpeed * 1.6f * 1.6f * m_Car.CurrentSpeed) >= Vector3.Distance(m_Car.transform.position, path[pathIndex + i].position) * 250 * 0.65f)
+                        if (Mathf.Abs(steerCheck) > 0.8f && (m_Car.CurrentSpeed * 1.6f * 1.6f * m_Car.CurrentSpeed) >= Vector3.Distance(m_Car.transform.position, path[pathIndex + i].position) * 250 * 0.8f)
                         {
                             accelerationDirection = 0;
                             brake = 1;
