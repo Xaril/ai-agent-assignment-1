@@ -17,6 +17,7 @@ namespace UnityStandardAssets.Vehicles.Car
         private int maxDistTarget;
         private int maxTimesFoundGoal;
         private int maxShortcutAngle;
+        private int maxShortcutTheta;
         private float timeStep;
         private int numberOfSteps;
         private float time;
@@ -70,9 +71,10 @@ namespace UnityStandardAssets.Vehicles.Car
             InitializeCSpace();
 
             RRTIterations = 500000;     // Limits the number of iterations allowed in the RRT before running the car.
-            maxTimesFoundGoal = 100;    // Limits the times that we find goal before running the car.
+            maxTimesFoundGoal = 10;    // Limits the times that we find goal before running the car.
             maxShortcutAngle = 5;       // Angle deviance accepted for points that can give a straight line shortcut.
-            maxDistTarget = 3;          // Maximum accepted distance from a target point.
+            maxShortcutTheta = 15;
+            maxDistTarget = 5;          // Maximum accepted distance from a target point.
             timeStep = 0.05f;
             numberOfSteps = 5;
             time = 0;
@@ -171,7 +173,7 @@ namespace UnityStandardAssets.Vehicles.Car
                         float angle = Vector3.Angle(m_Car.transform.forward, direction);
 
                         //If somewhat straight to point on path, check if it is possible to go there
-                        if (angle <= maxShortcutAngle && Quaternion.Angle(Quaternion.Euler(0, path[i].theta, 0), Quaternion.LookRotation(direction)) <= maxShortcutAngle)
+                        if (angle <= maxShortcutAngle && Quaternion.Angle(Quaternion.Euler(0, path[i].theta, 0), Quaternion.LookRotation(direction)) <= maxShortcutTheta)
                         {
                             bool collision = false;
                             for(float h = 0; h <= 1; h += 0.005f)
@@ -656,18 +658,18 @@ namespace UnityStandardAssets.Vehicles.Car
 
         }
 
-        private float [] RK4Step(float x, float z, float theta, float delta, float carLenght, float velocity, float timeStep) 
+        private float [] RK4Step(float x, float z, float theta, float delta, float length, float velocity, float h) 
         {
-            float[] k1 = FPrime(theta, delta, carLenght, velocity);
-            float[] k2 = FPrime(theta + k1[2] * (timeStep / 2), delta, carLenght, velocity);
-            float[] k3 = FPrime(theta + k2[2] * (timeStep / 2), delta, carLenght, velocity);
-            float[] k4 = FPrime(theta + k3[2] * (timeStep), delta, carLenght, velocity);
+            float[] k1 = FPrime(theta, delta, length, velocity);
+            float[] k2 = FPrime(theta + k1[2] * (timeStep / 2), delta, length, velocity);
+            float[] k3 = FPrime(theta + k2[2] * (timeStep / 2), delta, length, velocity);
+            float[] k4 = FPrime(theta + k3[2] * (timeStep), delta, length, velocity);
 
             float[] newState = new float[] { 0, 0, 0 };
 
             float[] oldState = new float[] { x, z, theta };
             for(int i = 0; i < 3; i++){
-                newState[i] = oldState[i] + (timeStep / 6) * (k1[i] + k2[i] + k3[i] + k4[i]);
+                newState[i] = oldState[i] + (h / 6) * (k1[i] + k2[i] + k3[i] + k4[i]);
                 }
             return newState;
             }
@@ -678,7 +680,7 @@ namespace UnityStandardAssets.Vehicles.Car
             Vector3 direction = Quaternion.Euler(0, theta, 0) * Vector3.forward;
             Vector3 directionToPoint = point - position;
             float angle = Vector3.Angle(direction, directionToPoint) * Mathf.Sign(-direction.x * directionToPoint.z + direction.z * directionToPoint.x);
-            float steerAngle = Mathf.Clamp(angle, -25, 25) / 25;
+            float steerAngle = Mathf.Clamp(angle, -m_Car.m_MaximumSteerAngle, m_Car.m_MaximumSteerAngle) / m_Car.m_MaximumSteerAngle;
             return steerAngle;
         }
 
